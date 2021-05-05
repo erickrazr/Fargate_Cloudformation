@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An example CloudFormation template for Fargate.
+Parameters:
+
+  VPC:
+    Type: String
+    Default: vpc-094ac3e6499695bdc     #  -- VPC ID which the task will run
+  SubnetA:
+    Type: String
+    Default: subnet-089c47b76e5e5d7fa  #-- PRIMARY SubnetID 
+  SubnetB:
+    Type: String
+    Default: subnet-09f91f25d077c6fd2  #-- Secondary SubnetID 
+  ServiceName:
+    Type: String
+    Default: eferreirafg   # ----- ECS Service Name
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join ['', [!Ref ServiceName, -Cluster]]            #-- ECS Cluster name will be "Servicename-Cluster"
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    DependsOn: LogGroup
+    Properties:
+      ExecutionRoleArn: !Ref ExecutionRole
+      ContainerDefinitions:
+        - 
+#--------------------------------CONTAINER TO BE PROTECTED -------------------------------#
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+#----------------- END Twistlock modifications -------------------************#
+          EntryPoint:  
+            - /var/lib/twistlock/fargate/fargate_defender.sh    #########################################
+            - fargate                                           #      Do not modify those 3 lines      # 
+            - entrypoint                                        #########################################
+            - entry.sh       #-- Put you entrypoint here.
+          LinuxParameters:
+            Capabilities:
+              Add:
+                - SYS_PTRACE
+          Environment:
+            - Name: DEFENDER_TYPE
+              Value: fargate
+            - Name: FARGATE_TASK
+              Value: <TASK_TO_BE_PROTECTED>
+            - Name: TW_CONTAINER_NAME
+              Value: <CONTAINER_NAME_TO_BE_PROTECTED>
+            - Name: TW_IMAGE_NAME
+              Value: '<IMAGE_NAME_TO_BE_PROTECTED>'
+          VolumesFrom:
+            - SourceContainer: TwistlockDefender
+              ReadOnly: false
+          DependsOn:
+            - ContainerName: TwistlockDefender
+              Condition: START
+          Essential: true
+#--------------------------# END Twistlock modifications ---------------------------#
+          Cpu: 0
+          Image: 'matthewabq/twistlock-fargate-auto'
+          Name: twistlock-fargate-task
+#-------------------------------- END CONTAINER TO BE PROTECTED -------------------------------#
+#--------------------------Fargate Sidecar -------------------------------# 
+        -
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+          EntryPoint:
+            - /usr/local/bin/defender
+            - fargate
+            - sidecar
+          Cpu: 0
+          Environment:
+            - Name: DEFENDER_TYPE
+              Value: fargate
+            - Name: FARGATE_TASK
+              Value: <TASK_TO_BE_PROTECTED>
+            - Name: INSTALL_BUNDLE
+              Value: <INSTALL_BUNDLE_STRING>
+            - Name: WS_ADDRESS
+              Value: '<WS_CONSOLE_ADDRESS>'
+          MountPoints: []
+          VolumesFrom: []
+          Image: registry-auth.twistlock.com/tw_0j3lwkoilgmq20qnb0funxhopesukkpt/twistlock/defender:defender_21_04_412
+          Essential: true
+          Name: TwistlockDefender
+#--------------------------END Fargate Sidecar -------------------------------#
+      Memory: '1024'
+      Cpu: 512
+      TaskRoleArn: !Ref TaskRole
+      Family: twistlock-fargate-task
+      Volumes: []
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+
+# Service Definition
+  Service:
+    Type: AWS::ECS::Service
+    Properties: 
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref SubnetA
+            - !Ref SubnetB
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+
+# LogGroup for Storing the logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['', [/ecs/, !Ref ServiceName, TaskDefinition]]
+
+# Container Sercurity Group
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref ServiceName, ContainerSecurityGroup]]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          CidrIp: 0.0.0.0/0
+          FromPort: 8080
+          ToPort: 8080
+
+# A role needed by ECS
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, ExecutionRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+# A role for the containers
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, TaskRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
