@@ -35,7 +35,7 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: ecs
-#----------------- END Twistlock modifications -------------------************#
+#----------------- START Twistlock modifications -------------------************#
           EntryPoint:  
             - /var/lib/twistlock/fargate/fargate_defender.sh    #########################################
             - fargate                                           #      Do not modify those 3 lines      # 
