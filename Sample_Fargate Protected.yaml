@@ -90,7 +90,7 @@ Resources:
               Value: '<WS_CONSOLE_ADDRESS>'
           MountPoints: []
           VolumesFrom: []
-          Image: registry-auth.twistlock.com/tw_0j3lwkoilgmq20qnb0funxhopesukkpt/twistlock/defender:defender_21_04_412
+          Image: <TwistLock_Docker_Image_Stored_IN_PRIVATE_REGISTRY>
           Essential: true
           Name: TwistlockDefender
 #--------------------------END Fargate Sidecar -------------------------------#
